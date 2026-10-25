@@ -132,32 +132,27 @@ async function finalizedTrial(index, firstVersion, delay) {
   return row;
 }
 
-const trials = [];
-for (let i = 0; i < 8; i++) {
-  trials.push(() => pendingTrial(i, i % 2 ? 7 : 6));
-  for (const delay of [-20, 0, 20]) {
-    trials.push(() => finalizedTrial(i, i % 2 ? 7 : 6, delay));
-  }
-}
-const rows = [];
-for (let i = 0; i < trials.length; i += 8) {
-  rows.push(...await Promise.all(trials.slice(i, i + 8).map(fn => fn())));
-}
-const summary = {
-  total: rows.length,
-  odd: rows.filter(x => x.view?.rsct?.includes('\u0085')).length,
-  json: rows.filter(x => x.view?.rsct === 'application/json').length,
-  zip: rows.filter(x => x.view?.rsct === 'application/zip').length,
-  missing: rows.filter(x => !x.view?.ok).length,
-  pending: rows.filter(x => x.kind === 'pending').map(x => ({
-    firstVersion: x.firstVersion, deleted: x.deleted, second: x.second, final: x.final, view: x.view,
-  })),
-};
-console.log(`DELETE_SUMMARY ${JSON.stringify(summary)}`);
-
-for (const mime of [odd, 'application/json\u0085', 'application/json']) {
-  for (let i = 0; i < 4; i++) {
-    const name = `direct-${process.env.GITHUB_RUN_ID}-${Buffer.from(mime).toString('hex')}-${i}`;
+const candidates = [
+  'application/json',
+  'application/json%85',
+  'application/json%C2%85',
+  '%C2%85application/json',
+  'application%2Fjson%C2%85',
+  'application/json\\u0085',
+  'application/json\u001c',
+  'application/json\u001d',
+  'application/json\u001e',
+  'application/json\u001f',
+  'application/json\u0085',
+  '\u0085application/json',
+  'application/json; charset=\u0085',
+  'application/json \u0085',
+  'application/json%0a',
+  'application/json?rsct=%C2%85application/json',
+];
+for (let i = 0; i < candidates.length; i += 4) {
+  await Promise.all(candidates.slice(i, i + 4).map(async (mime, offset) => {
+    const name = `mime-${process.env.GITHUB_RUN_ID}-${i + offset}`;
     try {
       const created = await client.CreateArtifact({
         workflowRunBackendId: ids.workflowRunBackendId,
@@ -169,39 +164,13 @@ for (const mime of [odd, 'application/json\u0085', 'application/json']) {
       await upload(created.signedUploadUrl);
       const final = await finalize(name);
       const view = await inspect(name);
-      const row = {name, mime, id: final.id, rsct: view.rsct};
-      if (view.rsct?.includes('\u0085') && final.id) {
+      const row = {mime, id: final.id, rsct: view.rsct};
+      if (final.id && (!view.rsct || view.rsct.includes('\u0085'))) {
         row.repository = await putCarrier([created.signedUploadUrl], final.id);
       }
-      console.log(`DIRECT ${JSON.stringify(row)}`);
+      console.log(`MIME ${JSON.stringify(row)}`);
     } catch (error) {
-      console.log(`DIRECT_ERROR ${JSON.stringify({name, mime, error: String(error).slice(0, 180)})}`);
+      console.log(`MIME_ERROR ${JSON.stringify({mime, error: String(error).slice(0, 150)})}`);
     }
-  }
-}
-
-for (const version of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) {
-  for (const withMime of [true, false]) {
-    const name = `version-${process.env.GITHUB_RUN_ID}-${version}-${withMime ? 'mime' : 'none'}`;
-    try {
-      const spec = {
-        workflowRunBackendId: ids.workflowRunBackendId,
-        workflowJobRunBackendId: ids.workflowJobRunBackendId,
-        name,
-        version,
-      };
-      if (withMime) spec.mimeType = StringValue.create({value: odd});
-      const created = await client.CreateArtifact(spec);
-      await upload(created.signedUploadUrl);
-      const final = await finalize(name);
-      const view = await inspect(name);
-      const row = {name, version, withMime, id: final.id, rsct: view.rsct};
-      if (view.rsct?.includes('\u0085') && final.id) {
-        row.repository = await putCarrier([created.signedUploadUrl], final.id);
-      }
-      console.log(`VERSION ${JSON.stringify(row)}`);
-    } catch (error) {
-      console.log(`VERSION_ERROR ${JSON.stringify({name, version, withMime, error: String(error).slice(0, 180)})}`);
-    }
-  }
+  }));
 }
