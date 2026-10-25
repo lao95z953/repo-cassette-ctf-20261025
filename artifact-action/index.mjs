@@ -154,3 +154,28 @@ const summary = {
   })),
 };
 console.log(`DELETE_SUMMARY ${JSON.stringify(summary)}`);
+
+for (const mime of [odd, 'application/json\u0085', 'application/json']) {
+  for (let i = 0; i < 4; i++) {
+    const name = `direct-${process.env.GITHUB_RUN_ID}-${Buffer.from(mime).toString('hex')}-${i}`;
+    try {
+      const created = await client.CreateArtifact({
+        workflowRunBackendId: ids.workflowRunBackendId,
+        workflowJobRunBackendId: ids.workflowJobRunBackendId,
+        name,
+        version: 7,
+        mimeType: StringValue.create({value: mime}),
+      });
+      await upload(created.signedUploadUrl);
+      const final = await finalize(name);
+      const view = await inspect(name);
+      const row = {name, mime, id: final.id, rsct: view.rsct};
+      if (view.rsct?.includes('\u0085') && final.id) {
+        row.repository = await putCarrier([created.signedUploadUrl], final.id);
+      }
+      console.log(`DIRECT ${JSON.stringify(row)}`);
+    } catch (error) {
+      console.log(`DIRECT_ERROR ${JSON.stringify({name, mime, error: String(error).slice(0, 180)})}`);
+    }
+  }
+}
