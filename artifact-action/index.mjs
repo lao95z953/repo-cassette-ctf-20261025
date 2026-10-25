@@ -179,3 +179,29 @@ for (const mime of [odd, 'application/json\u0085', 'application/json']) {
     }
   }
 }
+
+for (const version of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) {
+  for (const withMime of [true, false]) {
+    const name = `version-${process.env.GITHUB_RUN_ID}-${version}-${withMime ? 'mime' : 'none'}`;
+    try {
+      const spec = {
+        workflowRunBackendId: ids.workflowRunBackendId,
+        workflowJobRunBackendId: ids.workflowJobRunBackendId,
+        name,
+        version,
+      };
+      if (withMime) spec.mimeType = StringValue.create({value: odd});
+      const created = await client.CreateArtifact(spec);
+      await upload(created.signedUploadUrl);
+      const final = await finalize(name);
+      const view = await inspect(name);
+      const row = {name, version, withMime, id: final.id, rsct: view.rsct};
+      if (view.rsct?.includes('\u0085') && final.id) {
+        row.repository = await putCarrier([created.signedUploadUrl], final.id);
+      }
+      console.log(`VERSION ${JSON.stringify(row)}`);
+    } catch (error) {
+      console.log(`VERSION_ERROR ${JSON.stringify({name, version, withMime, error: String(error).slice(0, 180)})}`);
+    }
+  }
+}
