@@ -132,46 +132,25 @@ async function finalizedTrial(index, firstVersion, delay) {
   return row;
 }
 
-const candidates = [
-  'application/json',
-  'application/json ',
-  ' application/json',
-  'APPLICATION/JSON',
-  'application/json; charset=utf-8',
-  'application/json;charset=utf-8',
-  'application/json,application/json',
-  'text/plain',
-  'image/png',
-  'application/octet-stream',
-  'application/vnd.github.v3+json',
-  'application/x-custom',
-  'application/json\u000b',
-  'application/json\u000c',
-  'application/json\t',
-  'application/json\u00a0',
-  'application/json\u200b',
-];
-for (let i = 0; i < candidates.length; i += 4) {
-  await Promise.all(candidates.slice(i, i + 4).map(async (mime, offset) => {
-    const name = `mime-${process.env.GITHUB_RUN_ID}-${i + offset}`;
-    try {
-      const created = await client.CreateArtifact({
-        workflowRunBackendId: ids.workflowRunBackendId,
-        workflowJobRunBackendId: ids.workflowJobRunBackendId,
-        name,
-        version: 7,
-        mimeType: StringValue.create({value: mime}),
-      });
-      await upload(created.signedUploadUrl);
-      const final = await finalize(name);
-      const view = await inspect(name);
-      const row = {mime, id: final.id, rsct: view.rsct};
-      if (final.id && (!view.rsct || view.rsct.includes('\u0085'))) {
-        row.repository = await putCarrier([created.signedUploadUrl], final.id);
-      }
-      console.log(`MIME ${JSON.stringify(row)}`);
-    } catch (error) {
-      console.log(`MIME_ERROR ${JSON.stringify({mime, error: String(error).slice(0, 150)})}`);
+async function collide(i) {
+  const name = `collide-${process.env.GITHUB_RUN_ID}-${i}`;
+  const versions = i % 2 ? [7, 6] : [6, 7];
+  try {
+    const [a, b] = await Promise.all(versions.map(v => create(name, v)));
+    await Promise.all([a, b].map(x => upload(x.url).catch(() => false)));
+    const final = await finalize(name);
+    const view = await inspect(name);
+    const row = {i, versions, first: a.ok, second: b.ok, id: final.id, rsct: view.rsct};
+    if (final.id && view.rsct?.includes('\u0085')) {
+      row.repository = await putCarrier([a.url, b.url], final.id);
+      console.log(`WINNER ${JSON.stringify(row)}`);
+    } else {
+      console.log(`COLLIDE ${JSON.stringify(row)}`);
     }
-  }));
+  } catch (error) {
+    console.log(`COLLIDE_ERROR ${JSON.stringify({i, error: String(error).slice(0, 150)})}`);
+  }
+}
+for (let i = 0; i < 128; i += 8) {
+  await Promise.all(Array.from({length: 8}, (_, j) => collide(i + j)));
 }
